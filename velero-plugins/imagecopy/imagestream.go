@@ -13,7 +13,11 @@ import (
 	"github.com/containers/image/v5/transports/alltransports"
 	"github.com/go-logr/logr"
 	imagev1API "github.com/openshift/api/image/v1"
+
 	//"github.com/sirupsen/logrus"
+	imagev1 "github.com/openshift/client-go/image/clientset/versioned/typed/image/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 )
 
 // CopyLocalImageStreamImages copies all local images associated with the ImageStream
@@ -30,11 +34,17 @@ func CopyLocalImageStreamImages(
 	srcRegistry string,
 	destRegistry string,
 	destNamespace string,
+	backupUID string,
 	copyOptions *copy.Options,
 	log logr.Logger,
 	updateDigest bool) error {
 	localImageCopied := false
 	localImageCopiedByTag := false
+	imageClient, err := imageClient()
+	if err != nil {
+		log.Info(fmt.Sprintf("Error getting image client: %v", err))
+		return err
+	}
 	for tagIndex, tag := range imageStream.Status.Tags {
 		log.Info(fmt.Sprintf("[imagecopy] Copying tag: %#v", tag.Tag))
 		specTag := findSpecTag(imageStream.Spec.Tags, tag.Tag)
@@ -50,6 +60,21 @@ func CopyLocalImageStreamImages(
 		}
 		// Iterate over items in reverse order so most recently tagged is copied last
 		for i := len(tag.Items) - 1; i >= 0; i-- {
+			currentImageStreamImage, err := imageClient.ImageStreamImages(specTag.From.Namespace).Get(context.Background(), specTag.Name, metav1.GetOptions{})
+			if err != nil {
+				log.Info(fmt.Sprintf("Error getting current image stream: %v", err))
+				return err
+			}
+			if backupUID == "restore" {
+				return nil
+			}
+			if currentImageStreamImage.Annotations["oadp.openshift.io/backup-uid"] == backupUID {
+				log.Info(fmt.Sprintf("Image stream %s/%s has been backed up by this velero backup, skipping", imageStream.Namespace, imageStream.Name))
+				return nil
+			}
+			log.Info(fmt.Sprintf("Backing up Image stream image %s/%s", imageStream.Namespace, imageStream.Name))
+			
+
 			dockerImageReference := tag.Items[i].DockerImageReference
 			if len(internalRegistryPath) > 0 && strings.HasPrefix(dockerImageReference, internalRegistryPath) {
 				if len(srcRegistry) == 0 {
@@ -97,6 +122,19 @@ func CopyLocalImageStreamImages(
 	log.Info(fmt.Sprintf("[imagecopy] copied at least one local image: %t", localImageCopied))
 	log.Info(fmt.Sprintf("[imagecopy] copied at least one local image by tag: %t", localImageCopiedByTag))
 	return nil
+}
+
+
+
+func imageClient() (imagev1.ImageV1Interface, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+	if config.BearerToken == "" {
+		return nil, errors.New("BearerToken not found, can't authenticate with registry")
+	}
+	return imagev1.NewForConfig(config)
 }
 
 func copyImage(log logr.Logger,src, dest string, copyOptions *copy.Options) ([]byte, error) {

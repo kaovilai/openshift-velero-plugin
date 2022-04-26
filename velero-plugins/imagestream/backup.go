@@ -11,7 +11,9 @@ import (
 	"github.com/konveyor/openshift-velero-plugin/velero-plugins/imagecopy"
 	imagev1API "github.com/openshift/api/image/v1"
 	"github.com/sirupsen/logrus"
+	"github.com/vmware-tanzu/velero/internal/credentials"
 	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/persistence"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -75,12 +77,16 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *v1.Backup) (ru
 	if err != nil {
 		return nil, nil, err
 	}
+	// get ObjectStore
+	objectStore, err := getObjectStore(backup)
+
 	err = imagecopy.CopyLocalImageStreamImages(
 		imageStream,
 		internalRegistry,
 		internalRegistry,
 		migrationRegistry,
 		imageStream.Namespace,
+		string(backup.UID),
 		&copy.Options{
 			SourceCtx:      sourceCtx,
 			DestinationCtx: destinationCtx,
@@ -97,4 +103,14 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *v1.Backup) (ru
 	item.SetUnstructuredContent(out)
 	return item, nil, nil
 
+}
+
+func getObjectStore(backup *v1.Backup) velero.ObjectStore {
+	objectStore, err := persistence.NewObjectBackupStoreGetter(
+		credentials.NewNamespacedFileStore()
+	)
+	if err != nil {
+		logrus.Errorf("Error getting object store: %v", err)
+	}
+	return objectStore
 }

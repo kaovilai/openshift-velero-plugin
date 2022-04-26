@@ -85,6 +85,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		migrationRegistry,
 		internalRegistry,
 		destNamespace,
+		"",
 		&copy.Options{
 			SourceCtx:      sourceCtx,
 			DestinationCtx: destinationCtx,
