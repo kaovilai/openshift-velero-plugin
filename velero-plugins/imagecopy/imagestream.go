@@ -113,6 +113,13 @@ func copyImage(log logr.Logger,src, dest string, copyOptions *copy.Options) ([]b
 	if err != nil {
 		return []byte{}, fmt.Errorf("Invalid destination name %s: %v", dest, err)
 	}
+	if dest == "pluginRegistry" {
+		r, err := GetRegistry()
+		if err != nil {
+			return []byte{}, err
+		}
+		r.ListenAndServe()
+	}
 	// Let's retry the image copy up to 10 times
 	// Each retry will wait 5 seconds longer
 	// Let's log a warning if we encounter `blob unknown to registry`
