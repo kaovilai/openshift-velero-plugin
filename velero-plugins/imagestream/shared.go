@@ -58,11 +58,13 @@ func GetUdistributionTransportForLocation(uid k8stypes.UID, location, namespace 
 		log.Info("Got udistribution transport from cache")
 		return ut, nil
 	}
+	log.Info("THIS IS DEBUG BUILD")
 	log.Info("Getting registry envs for udistribution transport")
-	envs, err := GetRegistryEnvsForLocation(location, namespace)
+	envs, err := GetRegistryEnvsForLocation(location, namespace, &log)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("errors getting registryenv: %v", err))
 	}
+	log.Infof("envs %v", envs)
 	log.Info("Creating udistribution transport")
 	ut, err := udistribution.NewTransportFromNewConfig("", envs)
 	if err != nil {
@@ -82,7 +84,7 @@ func GetUdistributionKey(location, namespace string) string {
 
 // Get Registry environment variables to create registry client
 // This should be called once per backup.
-func GetRegistryEnvsForLocation(location string, namespace string) ([]string, error) {
+func GetRegistryEnvsForLocation(location string, namespace string, log *logrus.FieldLogger) ([]string, error) {
 	bsl, err := common.GetBackupStorageLocation(location, namespace)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("errors getting bsl: %v", err))
@@ -92,16 +94,18 @@ func GetRegistryEnvsForLocation(location string, namespace string) ([]string, er
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("errors getting registry env vars: %v", err))
 	}
-	return coreV1EnvVarArrToStringArr(envVars), nil
+	return coreV1EnvVarArrToStringArr(envVars, log), nil
 }
 
-func coreV1EnvVarArrToStringArr(envVars []corev1.EnvVar) []string {
+func coreV1EnvVarArrToStringArr(envVars []corev1.EnvVar, log *logrus.FieldLogger) []string {
 	var envVarsStr []string
 	for _, envVar := range envVars {
-		envVarsStr = append(envVarsStr, coreV1EnvVarToString(envVar))
+		envVarsStr = append(envVarsStr, coreV1EnvVarToString(envVar, log))
 	}
 	return envVarsStr
 }
-func coreV1EnvVarToString(envVar corev1.EnvVar) string {
+func coreV1EnvVarToString(envVar corev1.EnvVar, log *logrus.FieldLogger) string {
+	(*log).Debugf("in coreV1EnvVarToString")
+	(*log).Debugf("envVar.Name: %v, envVar.Value: %v, envVar.ValueFrom: %v", envVar.Name, envVar.Value, envVar.ValueFrom)
 	return fmt.Sprintf("%s=%s", envVar.Name, envVar.Value)
 }
