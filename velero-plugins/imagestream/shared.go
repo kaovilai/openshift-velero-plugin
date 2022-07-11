@@ -1,6 +1,8 @@
 package imagestream
 
 import (
+	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 
@@ -10,7 +12,9 @@ import (
 	"github.com/konveyor/openshift-velero-plugin/velero-plugins/common"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 var (
@@ -60,7 +64,7 @@ func GetUdistributionTransportForLocation(uid k8stypes.UID, location, namespace 
 	}
 	log.Info("THIS IS DEBUG BUILD")
 	log.Info("Getting registry envs for udistribution transport")
-	envs, err := GetRegistryEnvsForLocation(location, namespace, &log)
+	envs, err := GetRegistryEnvsForLocation(location, namespace)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("errors getting registryenv: %v", err))
 	}
@@ -84,7 +88,7 @@ func GetUdistributionKey(location, namespace string) string {
 
 // Get Registry environment variables to create registry client
 // This should be called once per backup.
-func GetRegistryEnvsForLocation(location string, namespace string, log *logrus.FieldLogger) ([]string, error) {
+func GetRegistryEnvsForLocation(location string, namespace string) ([]string, error) {
 	bsl, err := common.GetBackupStorageLocation(location, namespace)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("errors getting bsl: %v", err))
@@ -94,18 +98,50 @@ func GetRegistryEnvsForLocation(location string, namespace string, log *logrus.F
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("errors getting registry env vars: %v", err))
 	}
-	return coreV1EnvVarArrToStringArr(envVars, log), nil
+	return coreV1EnvVarArrToStringArr(envVars, bsl.Namespace), nil
 }
 
-func coreV1EnvVarArrToStringArr(envVars []corev1.EnvVar, log *logrus.FieldLogger) []string {
+func coreV1EnvVarArrToStringArr(envVars []corev1.EnvVar, namespace string) []string {
 	var envVarsStr []string
 	for _, envVar := range envVars {
-		envVarsStr = append(envVarsStr, coreV1EnvVarToString(envVar, log))
+		envVarsStr = append(envVarsStr, coreV1EnvVarToString(envVar, namespace))
 	}
 	return envVarsStr
 }
-func coreV1EnvVarToString(envVar corev1.EnvVar, log *logrus.FieldLogger) string {
-	(*log).Debugf("in coreV1EnvVarToString")
-	(*log).Debugf("envVar.Name: %v, envVar.Value: %v, envVar.ValueFrom: %v", envVar.Name, envVar.Value, envVar.ValueFrom)
+func coreV1EnvVarToString(envVar corev1.EnvVar, namespace string) string {
+	if envVar.ValueFrom != nil {
+		if envVar.ValueFrom.SecretKeyRef != nil {	
+			secretData, err := getSecretKeyRefData(envVar.ValueFrom.SecretKeyRef, namespace)
+			if err != nil {
+				return err.Error()
+			}
+
+			return fmt.Sprintf("%s=%s", envVar.Name, secretData)
+		}
+	}
+
 	return fmt.Sprintf("%s=%s", envVar.Name, envVar.Value)
+}
+
+// Get secret from reference and namespace and return decoded data
+func getSecretKeyRefData(secretKeyRef *corev1.SecretKeySelector, namespace string) (string, error) {
+	icc, err := clients.GetInClusterConfig()
+	if err != nil {
+		return "", err
+	}
+	cv1c, err := corev1client.NewForConfig(icc)
+	if err != nil {
+		return "", err
+	}
+	secret, err := cv1c.Secrets(namespace).Get(context.Background(), secretKeyRef.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	// decode the secret as a string
+	decodedSecret, err := base64.StdEncoding.DecodeString(string(secret.Data[secretKeyRef.Key]))
+	if err != nil {
+		// wrap error with more info
+		return "",  errors.New(fmt.Sprintf("error decoding secret: %v", err))
+	}
+	return string(decodedSecret), nil
 }
