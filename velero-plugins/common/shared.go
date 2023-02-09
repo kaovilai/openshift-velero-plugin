@@ -3,29 +3,26 @@ package common
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/kaovilai/udistribution/pkg/image/udistribution"
 	"github.com/konveyor/openshift-velero-plugin/velero-plugins/clients"
 	"github.com/openshift/client-go/route/clientset/versioned/scheme"
 	"github.com/openshift/library-go/pkg/image/reference"
-	"github.com/openshift/oadp-operator/api/v1alpha1"
-	"github.com/openshift/oadp-operator/pkg/credentials"
 	"github.com/sirupsen/logrus"
 	velero "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 )
 
@@ -283,44 +280,3 @@ func GetBackupStorageLocation(name, namespace string) (*velero.BackupStorageLoca
 	return &result, nil
 }
 
-// Get secret for backup storage location along with key to use to get secret data.
-func GetSecretKeyForBackupStorageLocation(name, namespace string) (*corev1.Secret, string, error) {
-	if name == "" {
-		return nil, "", errors.New("cannot get secret for an empty name")
-	}
-	if namespace == "" {
-		return nil, "", errors.New("cannot get secret for an empty namespace")
-	}
-	bsl, err := GetBackupStorageLocation(name, namespace)
-	if err != nil {
-		return nil, "", err
-	}
-	var sName, sKey string
-	if bsl.Spec.Credential != nil {
-		sName = bsl.Spec.Credential.Name
-		sKey = bsl.Spec.Credential.Key
-	} else {
-		// discover secret name from OADP default for storage location's plugin
-		provider := strings.TrimPrefix(bsl.Spec.Provider, "velero.io/")
-		if psf, found := credentials.PluginSpecificFields[v1alpha1.DefaultPlugin(provider)]; found && psf.IsCloudProvider {
-			sName = psf.SecretName
-			sKey = "cloud" // default key
-		}
-	}
-	if sName == "" {
-		return nil, "", errors.New("cannot get secret for a storage location without a credential")
-	}
-	icc, err := clients.GetInClusterConfig()
-	if err != nil {
-		return nil, "", err
-	}
-	cv1c, err := corev1client.NewForConfig(icc)
-	if err != nil {
-		return nil, "", err
-	}
-	secret, err := cv1c.Secrets(namespace).Get(context.Background(), sName, metav1.GetOptions{})
-	if err != nil {
-		return nil, "", err
-	}
-	return secret, sKey, nil
-}

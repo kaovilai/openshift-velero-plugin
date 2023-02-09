@@ -2,9 +2,10 @@ package imagestream
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
+
+	"github.com/pkg/errors"
 
 	"github.com/containers/image/v5/types"
 	"github.com/kaovilai/udistribution/pkg/image/udistribution"
@@ -14,7 +15,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
 var (
@@ -121,11 +121,7 @@ func coreV1EnvVarToString(envVar corev1.EnvVar, namespace string) string {
 
 // Get secret from reference and namespace and return decoded data
 func getSecretKeyRefData(secretKeyRef *corev1.SecretKeySelector, namespace string) ([]byte, error) {
-	icc, err := clients.GetInClusterConfig()
-	if err != nil {
-		return []byte{}, err
-	}
-	cv1c, err := corev1client.NewForConfig(icc)
+	cv1c, err := clients.CoreClient()
 	if err != nil {
 		return []byte{}, err
 	}
