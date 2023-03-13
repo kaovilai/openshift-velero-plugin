@@ -180,16 +180,14 @@ func getRegistryEnvVars(bsl *velerov1.BackupStorageLocation) ([]corev1.EnvVar, e
 }
 
 func getAWSRegistryEnvVars(bsl *velerov1.BackupStorageLocation, awsEnvVars []corev1.EnvVar) ([]corev1.EnvVar, error) {
-
+	accessKey, secretKey, err := getAWSCreds(bsl)
+	if err != nil {
+		return nil, err
+	}
 	// create secret data and fill up the values and return from here
 	for i := range awsEnvVars {
 		if awsEnvVars[i].Name == RegistryStorageS3AccesskeyEnvVarKey {
-			awsEnvVars[i].ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "oadp-" + bsl.Name + "-" + bsl.Spec.Provider + "-registry-secret"},
-					Key:                  "access_key",
-				},
-			}
+			awsEnvVars[i].Value = accessKey
 		}
 
 		if awsEnvVars[i].Name == RegistryStorageS3BucketEnvVarKey {
@@ -206,12 +204,7 @@ func getAWSRegistryEnvVars(bsl *velerov1.BackupStorageLocation, awsEnvVars []cor
 		}
 
 		if awsEnvVars[i].Name == RegistryStorageS3SecretkeyEnvVarKey {
-			awsEnvVars[i].ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "oadp-" + bsl.Name + "-" + bsl.Spec.Provider + "-registry-secret"},
-					Key:                  "secret_key",
-				},
-			}
+			awsEnvVars[i].Value = secretKey
 		}
 
 		if awsEnvVars[i].Name == RegistryStorageS3RegionendpointEnvVarKey {
@@ -227,7 +220,10 @@ func getAWSRegistryEnvVars(bsl *velerov1.BackupStorageLocation, awsEnvVars []cor
 }
 
 func getAzureRegistryEnvVars(bsl *velerov1.BackupStorageLocation, azureEnvVars []corev1.EnvVar) ([]corev1.EnvVar, error) {
-
+	azcreds, err := populateAzureRegistrySecret(bsl)
+	if err != nil || azcreds == nil {
+		return nil, err
+	}
 	for i := range azureEnvVars {
 		if azureEnvVars[i].Name == RegistryStorageAzureContainerEnvVarKey {
 			azureEnvVars[i].Value = bsl.Spec.StorageType.ObjectStorage.Bucket
@@ -238,37 +234,17 @@ func getAzureRegistryEnvVars(bsl *velerov1.BackupStorageLocation, azureEnvVars [
 		}
 
 		if azureEnvVars[i].Name == RegistryStorageAzureAccountkeyEnvVarKey {
-			azureEnvVars[i].ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "oadp-" + bsl.Name + "-" + bsl.Spec.Provider + "-registry-secret"},
-					Key:                  "storage_account_key",
-				},
-			}
+			azureEnvVars[i].Value = azcreds.strorageAccountKey
 		}
 		if azureEnvVars[i].Name == RegistryStorageAzureSPNClientIDEnvVarKey {
-			azureEnvVars[i].ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "oadp-" + bsl.Name + "-" + bsl.Spec.Provider + "-registry-secret"},
-					Key:                  "client_id_key",
-				},
-			}
+			azureEnvVars[i].Value = azcreds.clientID
 		}
 
 		if azureEnvVars[i].Name == RegistryStorageAzureSPNClientSecretEnvVarKey {
-			azureEnvVars[i].ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "oadp-" + bsl.Name + "-" + bsl.Spec.Provider + "-registry-secret"},
-					Key:                  "client_secret_key",
-				},
-			}
+			azureEnvVars[i].Value = azcreds.clientSecret
 		}
 		if azureEnvVars[i].Name == RegistryStorageAzureSPNTenantIDEnvVarKey {
-			azureEnvVars[i].ValueFrom = &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: "oadp-" + bsl.Name + "-" + bsl.Spec.Provider + "-registry-secret"},
-					Key:                  "tenant_id_key",
-				},
-			}
+			azureEnvVars[i].Value = azcreds.tenantID
 		}
 	}
 	return azureEnvVars, nil
@@ -329,34 +305,15 @@ func getSecretNameAndKey(bslSpec *velerov1.BackupStorageLocationSpec, plugin oad
 	return secretName, secretKey
 }
 
-
-func patchRegistrySecret(secret *corev1.Secret, bsl *velerov1.BackupStorageLocation, dpa *oadpv1alpha1.DataProtectionApplication) error {
-	var err error
-	// when updating the spec fields we update each field individually
-	// to get around the immutable fields
-	provider := bsl.Spec.Provider
-	switch provider {
-	case AWSProvider:
-		err = populateAWSRegistrySecret(bsl, secret)
-	case AzureProvider:
-		err = populateAzureRegistrySecret(bsl, secret)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func populateAWSRegistrySecret(bsl *velerov1.BackupStorageLocation, registrySecret *corev1.Secret) error {
+// get access key and secret key from BSL spec.
+func getAWSCreds(bsl *velerov1.BackupStorageLocation) (string, string, error) {
 	// Check for secret name
 	secretName, secretKey := getSecretNameAndKey(&bsl.Spec, oadpv1alpha1.DefaultPluginAWS)
 
 	// fetch secret and error
 	secret, err := getProviderSecret(secretName)
 	if err != nil {
-		return errors.Wrapf(err, "Error fetching provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name)
+		return "", "", errors.Wrapf(err, "Error fetching provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name)
 	}
 	awsProfile := "default"
 	if value, exists := bsl.Spec.Config[Profile]; exists {
@@ -365,36 +322,30 @@ func populateAWSRegistrySecret(bsl *velerov1.BackupStorageLocation, registrySecr
 	// parse the secret and get aws access_key and aws secret_key
 	AWSAccessKey, AWSSecretKey, err := parseAWSSecret(secret, secretKey, awsProfile)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Error parsing provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name))
+		return "", "", errors.Wrap(err, fmt.Sprintf("Error parsing provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name))
 	}
-
-	registrySecret.Data = map[string][]byte{
-		"access_key": []byte(AWSAccessKey),
-		"secret_key": []byte(AWSSecretKey),
-	}
-
-	return nil
+	return AWSAccessKey, AWSSecretKey, nil
 }
 
-func populateAzureRegistrySecret(bsl *velerov1.BackupStorageLocation, registrySecret *corev1.Secret) error {
+func populateAzureRegistrySecret(bsl *velerov1.BackupStorageLocation) (*azureCredentials, error) {
 	// Check for secret name
 	secretName, secretKey := getSecretNameAndKey(&bsl.Spec, oadpv1alpha1.DefaultPluginMicrosoftAzure)
 
 	// fetch secret and error
 	secret, err := getProviderSecret(secretName)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("Error fetching provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name))
+		return nil, errors.Wrap(err, fmt.Sprintf("Error fetching provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name))
 	}
 
 	// parse the secret and get azure storage account key
 	azcreds, err := parseAzureSecret(secret, secretKey)
 	if err != nil {
-		return errors.Wrapf(err, "Error parsing provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name)
+		return nil, errors.Wrapf(err, "Error parsing provider secret %s for backupstoragelocation %s/%s", secretName, bsl.Namespace, bsl.Name)
 	}
 
 	if len(bsl.Spec.Config["storageAccountKeyEnvVar"]) != 0 {
 		if azcreds.strorageAccountKey == "" {
-			return errors.New("no strorageAccountKey value present in credentials file")
+			return nil, errors.New("no strorageAccountKey value present in credentials file")
 		}
 	} else {
 		if len(azcreds.subscriptionID) == 0 &&
@@ -402,20 +353,11 @@ func populateAzureRegistrySecret(bsl *velerov1.BackupStorageLocation, registrySe
 			len(azcreds.clientID) == 0 &&
 			len(azcreds.clientSecret) == 0 &&
 			len(azcreds.resourceGroup) == 0 {
-			return errors.New("error finding service principal parameters for the supplied Azure credential")
+			return nil, errors.New("error finding service principal parameters for the supplied Azure credential")
 		}
 	}
 
-	registrySecret.Data = map[string][]byte{
-		"storage_account_key": []byte(azcreds.strorageAccountKey),
-		"subscription_id_key": []byte(azcreds.subscriptionID),
-		"tenant_id_key":       []byte(azcreds.tenantID),
-		"client_id_key":       []byte(azcreds.clientID),
-		"client_secret_key":   []byte(azcreds.clientSecret),
-		"resource_group_key":  []byte(azcreds.resourceGroup),
-	}
-
-	return nil
+	return &azcreds, nil
 }
 
 func getProviderSecret(secretName string) (corev1.Secret, error) {
