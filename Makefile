@@ -77,19 +77,5 @@ KUBEBUILDER_ASSETS=$(shell echo $(shell $(GOBIN)/setup-envtest use -p path) | se
 #     }
 # }
 envtest:
-	@if [ -f $(GOBIN)/setup-envtest ]; then \
-		installed=$$(go version -m $(GOBIN)/setup-envtest 2>/dev/null | awk '/^\tmod\t/{print $$3}'); \
-		latest=$$(GOFLAGS= go list -m -json sigs.k8s.io/controller-runtime/tools/setup-envtest@latest 2>/dev/null | awk -F'"' '/"Version"/{print $$4}'); \
-		if [ "$$installed" = "$$latest" ]; then \
-			echo "setup-envtest is up to date ($$installed)"; \
-		else \
-			echo "Upgrading setup-envtest from $$installed to $$latest"; \
-			GOFLAGS= go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest; \
-			echo "Upgraded setup-envtest to $$latest"; \
-		fi; \
-	else \
-		echo "Installing setup-envtest"; \
-		GOFLAGS= go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest; \
-		echo "Installed setup-envtest"; \
-	fi
+	GOFLAGS= go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 	$(GOBIN)/setup-envtest use -p path
